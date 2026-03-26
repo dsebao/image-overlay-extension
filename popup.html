@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Image Overlay Extension</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    label {
+      font-weight: bold;
+    }
+    #imagePreview {
+      max-width: 100%;
+      max-height: 150px;
+      margin-top: 10px;
+      display: none;
+    }
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #opacityValue {
+      width: 40px;
+    }
+    button {
+      padding: 8px;
+      background-color: #3748e1;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #505fe8;
+    }
+    button:disabled {
+      background-color: #e6e2fc;
+      cursor: not-allowed;
+    }
+    #removeOverlay {
+      background-color: #ea3544;
+    }
+    #removeOverlay:hover {
+      background-color: #f24755;
+    }
+    #status {
+      margin-top: 10px;
+      font-style: italic;
+    }
+    #topSlider, #widthSlider {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div>
+      <label for="imageUpload">Select an image:</label>
+      <input type="file" id="imageUpload" accept="image/*">
+      <img id="imagePreview" alt="Preview">
+    </div>
+    
+    <div>
+      <label for="opacitySlider">Opacity:</label>
+      <div class="slider-container">
+        <input type="range" id="opacitySlider" min="1" max="100" value="50">
+        <span id="opacityValue">50%</span>
+      </div>
+    </div>
+    <div>
+      <label for="widthSlider">Width: <span id="widthValue">100%</span></label>
+      <input type="range" id="widthSlider" min="10" max="130" value="100">
+    </div>
+    <div>
+      <label for="topSlider">Top Offset: <span id="topValue">0px</span></label>
+      <input type="range" id="topSlider" min="-1000" max="1000" value="0">
+    </div>
+    
+    <button id="applyOverlay" disabled>Apply Overlay</button>
+    <button id="removeOverlay" disabled>Remove Overlay</button>
+    <div id="status"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
