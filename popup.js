@@ -38,7 +38,10 @@ document.addEventListener('DOMContentLoaded', function() {
               exists: true,
               dragEnabled: overlay.style.pointerEvents === 'auto',
               topOffset: parseInt(overlay.dataset.topOffset) || 0,
-              retinaMode: overlay.dataset.retinaMode === 'true'
+              retinaMode: overlay.dataset.retinaMode === 'true',
+              requestedWidth: parseInt(overlay.dataset.requestedWidth) || 500,
+              naturalWidth: parseInt(overlay.dataset.naturalWidth) || 500,
+              opacity: parseFloat(overlay.style.opacity) || 0.5
             };
           }
           return { exists: false };
@@ -50,6 +53,27 @@ document.addEventListener('DOMContentLoaded', function() {
             removeButton.disabled = false;
             dragEnabled = result.dragEnabled;
             dragToggle.checked = dragEnabled;
+            
+            // Sync width values
+            if (result.requestedWidth !== undefined) {
+              width = result.requestedWidth;
+              widthSlider.value = result.requestedWidth;
+              widthValue.value = result.requestedWidth;
+              // Expand slider max if needed
+              widthSlider.max = Math.max(parseInt(widthSlider.max), result.requestedWidth);
+            }
+            
+            // Sync original width
+            if (result.naturalWidth !== undefined) {
+              originalWidth = retinaMode ? Math.round(result.naturalWidth / 2) : result.naturalWidth;
+            }
+            
+            // Sync opacity
+            if (result.opacity !== undefined) {
+              opacity = Math.round(result.opacity * 100);
+              opacitySlider.value = opacity;
+              opacityValue.value = opacity;
+            }
             
             // Sync top offset value
             if (result.topOffset !== undefined) {

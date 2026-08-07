@@ -162,20 +162,34 @@
     }
     
     .reset-btn {
-      background: none;
-      border: none;
-      padding: 4px 6px;
+      background: #1e1e2e;
+      border: 1px solid #2e2e44;
+      padding: 4px;
       cursor: pointer;
-      color: #6672f5;
-      font-size: 11px;
-      opacity: 0.7;
-      transition: opacity 0.15s;
-      line-height: 1;
-      margin-left: 4px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+    }
+    
+    .reset-btn svg {
+      width: 14px;
+      height: 14px;
+      stroke: #6672f5;
+      transition: transform 0.2s;
     }
     
     .reset-btn:hover {
-      opacity: 1;
+      background: #24243a;
+      border-color: #4a4a6a;
+    }
+    
+    .reset-btn:hover svg {
+      transform: rotate(-45deg);
     }
     
     .reset-btn:active {
@@ -418,7 +432,11 @@
               <input type="number" class="slider-value-input" id="widthValue" min="50" max="20000" value="500">
               <span class="slider-unit">px</span>
             </div>
-            <button class="reset-btn" id="resetWidth" title="Reset to original">↻</button>
+            <button class="reset-btn" id="resetWidth" title="Reset to original">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+            </button>
           </div>
         </div>
         <input type="range" id="widthSlider" min="50" max="8000" value="500" step="10">
