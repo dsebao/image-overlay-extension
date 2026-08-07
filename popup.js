@@ -1,12 +1,14 @@
 let imageData = null;
 let opacity = 50;
-let width = 100;
+let width = 500; // pixels
+let originalWidth = 500; // Store original width for reset
 let topOffset = 0;
 let leftOffset = 0;
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
 let dragEnabled = true;
+let retinaMode = false;
 
 document.addEventListener('DOMContentLoaded', function() {
   const imageUpload = document.getElementById('imageUpload');
@@ -15,9 +17,11 @@ document.addEventListener('DOMContentLoaded', function() {
   const opacityValue = document.getElementById('opacityValue');
   const widthSlider = document.getElementById('widthSlider');
   const widthValue = document.getElementById('widthValue');
+  const resetWidthBtn = document.getElementById('resetWidth');
   const topSlider = document.getElementById('topSlider');
   const topValue = document.getElementById('topValue');
   const dragToggle = document.getElementById('dragToggle');
+  const retinaToggle = document.getElementById('retinaToggle');
   const applyButton = document.getElementById('applyOverlay');
   const removeButton = document.getElementById('removeOverlay');
   const statusDiv = document.getElementById('status');
@@ -32,7 +36,9 @@ document.addEventListener('DOMContentLoaded', function() {
           if (overlay) {
             return {
               exists: true,
-              dragEnabled: overlay.style.pointerEvents === 'auto'
+              dragEnabled: overlay.style.pointerEvents === 'auto',
+              topOffset: parseInt(overlay.dataset.topOffset) || 0,
+              retinaMode: overlay.dataset.retinaMode === 'true'
             };
           }
           return { exists: false };
@@ -44,6 +50,22 @@ document.addEventListener('DOMContentLoaded', function() {
             removeButton.disabled = false;
             dragEnabled = result.dragEnabled;
             dragToggle.checked = dragEnabled;
+            
+            // Sync top offset value
+            if (result.topOffset !== undefined) {
+              topOffset = result.topOffset;
+              topSlider.value = result.topOffset;
+              topValue.value = result.topOffset;
+              // Adjust slider range if needed
+              topSlider.min = Math.min(parseInt(topSlider.min), result.topOffset);
+              topSlider.max = Math.max(parseInt(topSlider.max), result.topOffset);
+            }
+            
+            // Sync retina mode
+            if (result.retinaMode !== undefined) {
+              retinaMode = result.retinaMode;
+              retinaToggle.checked = retinaMode;
+            }
           }
         }
       });
@@ -61,15 +83,60 @@ document.addEventListener('DOMContentLoaded', function() {
         imagePreview.style.display = 'block';
         applyButton.disabled = false;
         statusDiv.textContent = "Image loaded successfully";
+
+        // Once the preview has decoded, sync the width slider to the image's natural width
+        imagePreview.onload = function() {
+          const naturalWidth = imagePreview.naturalWidth;
+          // If retina mode is enabled, set width to 50% of natural width
+          width = retinaMode ? Math.round(naturalWidth / 2) : naturalWidth;
+          originalWidth = width; // Save original width for reset
+          // Expand the slider max if the image is wider than the current ceiling
+          widthSlider.max = Math.max(parseInt(widthSlider.max), naturalWidth);
+          widthSlider.value = width;
+          widthValue.value = width;
+        };
       };
       reader.readAsDataURL(file);
     }
   });
 
+  // Sync number inputs → sliders
+  opacityValue.addEventListener('input', function() {
+    const val = Math.min(100, Math.max(1, parseInt(this.value) || 1));
+    opacity = val;
+    opacitySlider.value = val;
+    opacitySlider.dispatchEvent(new Event('input'));
+  });
+
+  widthValue.addEventListener('input', function() {
+    const val = Math.max(1, parseInt(this.value) || 1);
+    width = val;
+    widthSlider.max = Math.max(parseInt(widthSlider.max), val);
+    widthSlider.value = val;
+    widthSlider.dispatchEvent(new Event('input'));
+  });
+
+  // Reset width to original
+  resetWidthBtn.addEventListener('click', function() {
+    width = originalWidth;
+    widthSlider.value = originalWidth;
+    widthValue.value = originalWidth;
+    widthSlider.dispatchEvent(new Event('input'));
+  });
+
+  topValue.addEventListener('input', function() {
+    const val = parseInt(this.value) || 0;
+    topOffset = val;
+    topSlider.min = Math.min(parseInt(topSlider.min), val);
+    topSlider.max = Math.max(parseInt(topSlider.max), val);
+    topSlider.value = val;
+    topSlider.dispatchEvent(new Event('input'));
+  });
+
   // Handle opacity slider
   opacitySlider.addEventListener('input', function() {
     opacity = this.value;
-    opacityValue.textContent = opacity + '%';
+    opacityValue.value = opacity;
     
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
       if (tabs[0] && tabs[0].id) {
@@ -90,17 +157,40 @@ document.addEventListener('DOMContentLoaded', function() {
   // Handle width slider
   widthSlider.addEventListener('input', function() {
     width = this.value;
-    widthValue.textContent = width + '%';
+    widthValue.value = width;
     
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
       if (tabs[0] && tabs[0].id) {
         chrome.scripting.executeScript({
           target: {tabId: tabs[0].id},
-          func: function(newWidth) {
+          func: function(newWidthPx, retinaMode) {
             const overlay = document.getElementById('extension-image-overlay');
             if (overlay) {
-              overlay.style.width = newWidth + '%';
+              // In retina mode, use exact width; otherwise scale for device pixel ratio
+              let effectiveWidth = newWidthPx;
               
+              if (!retinaMode) {
+                const devicePixelRatio = window.devicePixelRatio || 1;
+                if (devicePixelRatio > 1) {
+                  effectiveWidth = newWidthPx * Math.min(devicePixelRatio, 2);
+                }
+              }
+              
+              overlay.style.width = effectiveWidth + 'px';
+              
+              // Maintain aspect ratio by getting stored height ratio
+              const naturalWidth = parseFloat(overlay.dataset.naturalWidth);
+              const naturalHeight = parseFloat(overlay.dataset.naturalHeight);
+              
+              if (naturalWidth && naturalHeight) {
+                const aspectRatio = naturalHeight / naturalWidth;
+                const calculatedHeight = effectiveWidth * aspectRatio;
+                overlay.style.height = calculatedHeight + 'px';
+              }
+              
+              console.log('Width updated to:', effectiveWidth + 'px', 'Retina mode:', retinaMode);
+              
+              // Only reset to center if not manually positioned
               const leftOffset = parseInt(overlay.dataset.leftOffset) || 0;
               if (leftOffset === 0) {
                 overlay.style.left = '50%';
@@ -108,7 +198,7 @@ document.addEventListener('DOMContentLoaded', function() {
               }
             }
           },
-          args: [width]
+          args: [parseInt(width), retinaMode]
         });
       }
     });
@@ -117,7 +207,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Handle top slider
   topSlider.addEventListener('input', function() {
     topOffset = this.value;
-    topValue.textContent = topOffset + 'px';
+    topValue.value = topOffset;
     
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
       if (tabs[0] && tabs[0].id) {
@@ -158,6 +248,57 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
+  // Handle retina mode toggle
+  retinaToggle.addEventListener('change', function() {
+    retinaMode = this.checked;
+    
+    // If an image is already loaded, adjust the width
+    if (imagePreview.src && imagePreview.naturalWidth) {
+      const naturalWidth = imagePreview.naturalWidth;
+      width = retinaMode ? Math.round(naturalWidth / 2) : naturalWidth;
+      originalWidth = width; // Update original width when retina mode changes
+      widthSlider.value = width;
+      widthValue.value = width;
+      
+      // Update overlay if it exists
+      chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        if (tabs[0] && tabs[0].id) {
+          chrome.scripting.executeScript({
+            target: {tabId: tabs[0].id},
+            func: function(newWidthPx, retinaMode) {
+              const overlay = document.getElementById('extension-image-overlay');
+              if (overlay) {
+                overlay.dataset.retinaMode = retinaMode;
+                
+                const naturalWidth = parseFloat(overlay.dataset.naturalWidth);
+                const naturalHeight = parseFloat(overlay.dataset.naturalHeight);
+                
+                // Calculate final width based on retina mode
+                let finalWidth = newWidthPx;
+                
+                if (naturalWidth && naturalHeight) {
+                  const aspectRatio = naturalHeight / naturalWidth;
+                  const calculatedHeight = finalWidth * aspectRatio;
+                  
+                  overlay.style.width = finalWidth + 'px';
+                  overlay.style.height = calculatedHeight + 'px';
+                  
+                  // Reset to center if not manually positioned
+                  const leftOffset = parseInt(overlay.dataset.leftOffset) || 0;
+                  if (leftOffset === 0) {
+                    overlay.style.left = '50%';
+                    overlay.style.transform = 'translateX(-50%)';
+                  }
+                }
+              }
+            },
+            args: [parseInt(width), retinaMode]
+          });
+        }
+      });
+    }
+  });
+
   // Apply overlay button
   applyButton.addEventListener('click', function() {
     statusDiv.textContent = "Applying overlay...";
@@ -166,37 +307,74 @@ document.addEventListener('DOMContentLoaded', function() {
       if (tabs[0] && tabs[0].id) {
         chrome.scripting.executeScript({
           target: {tabId: tabs[0].id},
-          func: function(imageData, opacity, width, topOffset, dragEnabled) {
-            try {
+          func: function(imageData, opacity, widthPx, topOffset, dragEnabled, retinaMode) {
+            return new Promise((resolve) => {
+              try {
               // Remove any existing overlay
               const existingOverlay = document.getElementById('extension-image-overlay');
               if (existingOverlay) {
                 existingOverlay.parentNode.removeChild(existingOverlay);
               }
-              
-              // Create overlay div
-              const overlay = document.createElement('div');
-              overlay.id = 'extension-image-overlay';
-              overlay.style.position = 'fixed';
-              overlay.style.width = width + '%';
-              overlay.style.left = '50%';
-              overlay.dataset.topOffset = topOffset;
-              overlay.dataset.leftOffset = '0';
-              overlay.style.transform = 'translateX(-50%)';
-              overlay.style.zIndex = '9999';
-              overlay.style.pointerEvents = dragEnabled ? 'auto' : 'none';
-              overlay.style.cursor = dragEnabled ? 'move' : 'default';
-              overlay.style.backgroundImage = `url(${imageData})`;
-              overlay.style.backgroundPosition = 'center top';
-              overlay.style.backgroundRepeat = 'no-repeat';
-              overlay.style.backgroundSize = '100% auto';
-              overlay.style.opacity = opacity;
-              overlay.style.top = (-window.scrollY + topOffset) + 'px';
-              overlay.style.transition = 'none';
-              overlay.style.userSelect = 'none';
 
-              // Drag functionality - only add if enabled
-              if (dragEnabled) {
+              // Create temporary image to get natural dimensions
+              const tempImg = new Image();
+              tempImg.src = imageData;
+
+              tempImg.onload = function() {
+                // Calculate dimensions based on retina mode
+                let effectiveWidth = widthPx;
+                
+                // In retina mode, use exact width; otherwise scale for device pixel ratio
+                if (!retinaMode) {
+                  const devicePixelRatio = window.devicePixelRatio || 1;
+                  if (devicePixelRatio > 1) {
+                    effectiveWidth = widthPx * Math.min(devicePixelRatio, 2);
+                  }
+                }
+                
+                // Calculate height maintaining aspect ratio
+                const aspectRatio = tempImg.naturalHeight / tempImg.naturalWidth;
+                const calculatedHeight = effectiveWidth * aspectRatio;
+                
+                // Calculate initial position based on current scroll position
+                // If topOffset is at default (0), position relative to current viewport
+                // Otherwise use the specified topOffset
+                const currentScrollY = window.scrollY;
+                const initialTopOffset = topOffset === 0 ? currentScrollY : topOffset;
+                
+                console.log('Creating overlay:', 'Requested:', widthPx + 'px', 'Effective:', effectiveWidth + 'px', 'Height:', calculatedHeight + 'px', 'Retina mode:', retinaMode, 'ScrollY:', currentScrollY, 'Initial offset:', initialTopOffset);
+                
+                // Create overlay div
+                const overlay = document.createElement('div');
+                overlay.id = 'extension-image-overlay';
+                overlay.style.position = 'fixed';
+                overlay.style.width = effectiveWidth + 'px';
+                overlay.style.height = calculatedHeight + 'px';
+                overlay.style.left = '50%';
+                overlay.style.transform = 'translateX(-50%)';
+                overlay.style.top = (-currentScrollY + initialTopOffset) + 'px';
+                overlay.style.zIndex = '9999';
+                overlay.style.backgroundImage = `url(${imageData})`;
+                overlay.style.backgroundPosition = 'center top';
+                overlay.style.backgroundRepeat = 'no-repeat';
+                overlay.style.backgroundSize = '100% 100%';
+                overlay.style.opacity = opacity;
+                overlay.style.transition = 'none';
+                overlay.style.userSelect = 'none';
+                overlay.style.pointerEvents = dragEnabled ? 'auto' : 'none';
+                overlay.style.cursor = dragEnabled ? 'move' : 'default';
+                
+                // Store dimension data for later use
+                overlay.dataset.topOffset = initialTopOffset;
+                overlay.dataset.leftOffset = '0';
+                overlay.dataset.requestedWidth = widthPx;
+                overlay.dataset.effectiveWidth = effectiveWidth;
+                overlay.dataset.naturalWidth = tempImg.naturalWidth;
+                overlay.dataset.naturalHeight = tempImg.naturalHeight;
+                overlay.dataset.retinaMode = retinaMode;
+                overlay.dataset.dragEnabled = dragEnabled;
+
+                // Drag functionality — always attached; respects dragEnabled at runtime
                 let localIsDragging = false;
                 let dragStartX = 0;
                 let dragStartY = 0;
@@ -204,14 +382,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 let startTop = 0;
 
                 const handleMouseDown = (e) => {
+                  if (overlay.dataset.dragEnabled === 'false') return;
                   localIsDragging = true;
                   dragStartX = e.clientX;
                   dragStartY = e.clientY;
-                  
+
                   const rect = overlay.getBoundingClientRect();
                   startLeft = rect.left;
                   startTop = rect.top;
-                  
+
                   overlay.style.transition = 'none';
                   document.addEventListener('mousemove', handleMouseMove);
                   document.addEventListener('mouseup', handleMouseUp);
@@ -220,17 +399,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const handleMouseMove = (e) => {
                   if (!localIsDragging) return;
-                  
+
                   const deltaX = e.clientX - dragStartX;
                   const deltaY = e.clientY - dragStartY;
-                  
+
                   const newLeft = startLeft + deltaX;
                   const newTop = startTop + deltaY;
-                  
+
                   overlay.style.left = newLeft + 'px';
                   overlay.style.top = newTop + 'px';
                   overlay.style.transform = 'none';
-                  
+
                   overlay.dataset.leftOffset = newLeft;
                   overlay.dataset.topOffset = newTop + window.scrollY;
                 };
@@ -242,15 +421,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
 
                 overlay.addEventListener('mousedown', handleMouseDown);
-              }
-  
-              // Get image dimensions and set up scroll handler
-              const tempImg = new Image();
-              tempImg.src = imageData;
-              
-              tempImg.onload = function() {
-                overlay.style.height = tempImg.naturalHeight + 'px';
                 
+                // Scroll handler
                 let rafPending = false;
                 
                 if (!window.__overlayScrollHandler) {
@@ -279,17 +451,23 @@ document.addEventListener('DOMContentLoaded', function() {
                   };
                   window.addEventListener('scroll', window.__overlayScrollHandler, { passive: true });
                 }
+                
+                document.body.appendChild(overlay);
+                console.log("Overlay applied successfully with retina mode:", retinaMode);
+                resolve(true);
               };
-  
-              document.body.appendChild(overlay);
-              console.log("Overlay applied successfully");
-              return true;
-            } catch (error) {
-              console.error("Error applying overlay:", error);
-              return false;
-            }
+
+              tempImg.onerror = function() {
+                console.error('Failed to load image for overlay creation');
+                resolve(false);
+              };
+              } catch (error) {
+                console.error("Error applying overlay:", error);
+                resolve(false);
+              }
+            });
           },
-          args: [imageData, opacity / 100, width, topOffset, dragToggle.checked]
+          args: [imageData, opacity / 100, parseInt(width), topOffset, dragToggle.checked, retinaMode]
         }, (results) => {
           if (results && results[0] && results[0].result) {
             removeButton.disabled = false;
@@ -317,352 +495,10 @@ document.addEventListener('DOMContentLoaded', function() {
               const existingOverlay = document.getElementById('extension-image-overlay');
               if (existingOverlay) {
                 existingOverlay.parentNode.removeChild(existingOverlay);
-                console.log("Overlay removed successfully");
-                return true;
-              }
-              return false;
-            } catch (error) {
-              console.error("Error removing overlay:", error);
-              return false;
-            }
-          }
-        }, (results) => {
-          if (results && results[0] && results[0].result) {
-            removeButton.disabled = true;
-            statusDiv.textContent = "Overlay removed successfully!";
-          } else {
-            statusDiv.textContent = "Error removing overlay. No overlay found.";
-          }
-        });
-      }
-    });
-  });
-});
-
-document.addEventListener('DOMContentLoaded', function() {
-  const imageUpload = document.getElementById('imageUpload');
-  const imagePreview = document.getElementById('imagePreview');
-  const opacitySlider = document.getElementById('opacitySlider');
-  const opacityValue = document.getElementById('opacityValue');
-  const widthSlider = document.getElementById('widthSlider');
-  const widthValue = document.getElementById('widthValue');
-  const dragToggle = document.getElementById('dragToggle'); // Drag toggle checkbox
-  const applyButton = document.getElementById('applyOverlay');
-  const removeButton = document.getElementById('removeOverlay');
-  const statusDiv = document.getElementById('status');
-
-  // Check if there's an active overlay and sync toggle state
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    if (tabs[0] && tabs[0].id) {
-      chrome.scripting.executeScript({
-        target: {tabId: tabs[0].id},
-        func: function() {
-          const overlay = document.getElementById('extension-image-overlay');
-          if (overlay) {
-            return {
-              exists: true,
-              dragEnabled: overlay.style.pointerEvents === 'auto'
-            };
-          }
-          return { exists: false };
-        }
-      }, (results) => {
-        if (results && results[0] && results[0].result) {
-          const result = results[0].result;
-          if (result.exists) {
-            removeButton.disabled = false;
-            // Sync the toggle state with the actual overlay state
-            dragEnabled = result.dragEnabled;
-            dragToggle.checked = dragEnabled;
-          }
-        }
-      });
-    }
-  });
-
-  // Handle image upload
-  imageUpload.addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = function(event) {
-        imageData = event.target.result;
-        imagePreview.src = imageData;
-        imagePreview.style.display = 'block';
-        applyButton.disabled = false;
-        statusDiv.textContent = "Image loaded successfully";
-      };
-      reader.readAsDataURL(file);
-    }
-  });
-
-  // Handle opacity slider
-  opacitySlider.addEventListener('input', function() {
-    opacity = this.value;
-    opacityValue.textContent = opacity + '%';
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      if (tabs[0] && tabs[0].id) {
-        chrome.scripting.executeScript({
-          target: {tabId: tabs[0].id},
-          func: function(newOpacity) {
-            const overlay = document.getElementById('extension-image-overlay');
-            if (overlay) {
-              overlay.style.opacity = newOpacity;
-            }
-          },
-          args: [opacity / 100]
-        });
-      }
-    });
-  });
-
-  // Handle width slider
-  widthSlider.addEventListener('input', function() {
-    width = this.value;
-    widthValue.textContent = width + '%';
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      if (tabs[0] && tabs[0].id) {
-        chrome.scripting.executeScript({
-          target: {tabId: tabs[0].id},
-          func: function(newWidth) {
-            const overlay = document.getElementById('extension-image-overlay');
-            if (overlay) {
-              overlay.style.width = newWidth + '%';
-              
-              // Only reset to center if not manually positioned
-              const leftOffset = parseInt(overlay.dataset.leftOffset) || 0;
-              if (leftOffset === 0) {
-                overlay.style.left = '50%';
-                overlay.style.transform = 'translateX(-50%)';
-              }
-            }
-          },
-          args: [width]
-        });
-      }
-    });
-  });
-
-  // Handle drag toggle
-  dragToggle.addEventListener('change', function() {
-    dragEnabled = this.checked;
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      if (tabs[0] && tabs[0].id) {
-        chrome.scripting.executeScript({
-          target: {tabId: tabs[0].id},
-          func: function(enabled) {
-            const overlay = document.getElementById('extension-image-overlay');
-            if (overlay) {
-              overlay.style.pointerEvents = enabled ? 'auto' : 'none';
-              
-              // Set cursor with proper force
-              if (enabled) {
-                overlay.style.cursor = 'move';
-                overlay.setAttribute('style', overlay.getAttribute('style') + '; cursor: move !important;');
-              } else {
-                overlay.style.cursor = 'default';
-                // Remove any previous !important cursor and set default
-                let style = overlay.getAttribute('style') || '';
-                style = style.replace(/;\s*cursor:\s*move\s*!important/g, '');
-                overlay.setAttribute('style', style + '; cursor: default;');
-              }
-              
-              // Store the drag enabled state on the overlay for reference
-              overlay.dataset.dragEnabled = enabled;
-              
-              console.log('Drag toggle changed:', enabled ? 'enabled' : 'disabled');
-            }
-          },
-          args: [dragEnabled]
-        });
-      }
-    });
-  });
-
-  // Apply overlay button
-  applyButton.addEventListener('click', function() {
-    statusDiv.textContent = "Applying overlay...";
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      if (tabs[0] && tabs[0].id) {
-        chrome.scripting.executeScript({
-          target: {tabId: tabs[0].id},
-          func: function(imageData, opacity, width, topOffset, dragEnabled) {
-            try {
-              // Remove any existing overlay
-              const existingOverlay = document.getElementById('extension-image-overlay');
-              if (existingOverlay) {
-                existingOverlay.parentNode.removeChild(existingOverlay);
-              }
-              
-              // Create overlay div
-              const overlay = document.createElement('div');
-              overlay.id = 'extension-image-overlay';
-              overlay.style.position = 'fixed';
-              overlay.style.width = width + '%';
-              overlay.style.left = '50%';
-              overlay.dataset.topOffset = topOffset;
-              overlay.dataset.leftOffset = '0'; // Initialize left offset
-              overlay.style.transform = 'translateX(-50%)';
-              overlay.style.zIndex = '9999';
-              overlay.style.pointerEvents = dragEnabled ? 'auto' : 'none'; // Enable drag or ignore layer
-              // Set cursor using setAttribute to ensure it's applied
-              if (dragEnabled) {
-                overlay.style.cursor = 'move';
-                overlay.setAttribute('style', overlay.getAttribute('style') + '; cursor: move !important;');
-              } else {
-                overlay.style.cursor = 'default';
-              }
-              overlay.style.backgroundImage = `url(${imageData})`;
-              overlay.style.backgroundPosition = 'center top';
-              overlay.style.backgroundRepeat = 'no-repeat';
-              overlay.style.backgroundSize = '100% auto';
-              overlay.style.opacity = opacity;
-              overlay.style.top = (-window.scrollY + topOffset) + 'px'; // Apply initial top offset
-              overlay.style.transition = 'none'; // Remove transition for smooth dragging
-              overlay.style.userSelect = 'none'; // Prevent text selection during drag
-
-              // Drag functionality - only add if enabled
-              if (dragEnabled) {
-                let localIsDragging = false;
-                let dragStartX = 0;
-                let dragStartY = 0;
-                let startLeft = 0;
-                let startTop = 0;
-
-                const handleMouseDown = (e) => {
-                  localIsDragging = true;
-                  isDragging = true; // Update global state for scroll handler
-                  dragStartX = e.clientX;
-                  dragStartY = e.clientY;
-                  
-                  // Get current position
-                  const rect = overlay.getBoundingClientRect();
-                  startLeft = rect.left;
-                  startTop = rect.top;
-                  
-                  overlay.style.transition = 'none';
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
-                  e.preventDefault();
-                };
-
-                const handleMouseMove = (e) => {
-                  if (!localIsDragging) return;
-                  
-                  const deltaX = e.clientX - dragStartX;
-                  const deltaY = e.clientY - dragStartY;
-                  
-                  const newLeft = startLeft + deltaX;
-                  const newTop = startTop + deltaY;
-                  
-                  overlay.style.left = newLeft + 'px';
-                  overlay.style.top = newTop + 'px';
-                  overlay.style.transform = 'none'; // Remove transform when dragging
-                  
-                  // Update stored offsets
-                  overlay.dataset.leftOffset = newLeft;
-                  overlay.dataset.topOffset = newTop + window.scrollY; // Account for scroll
-                };
-
-                const handleMouseUp = () => {
-                  localIsDragging = false;
-                  isDragging = false; // Update global state for scroll handler
-                  document.removeEventListener('mousemove', handleMouseMove);
-                  document.removeEventListener('mouseup', handleMouseUp);
-                };
-
-                overlay.addEventListener('mousedown', handleMouseDown);
-              }
-  
-              // Get image dimensions
-              const tempImg = new Image();
-              tempImg.src = imageData;
-              
-              tempImg.onload = function() {
-                overlay.style.height = tempImg.naturalHeight + 'px';
-                
-                let rafPending = false;
-                let isDragging = false; // Track dragging state for scroll handler
-                
-                // Store reference to isDragging for scroll handler
-                if (dragEnabled) {
-                  overlay.addEventListener('mousedown', () => { isDragging = true; });
-                  document.addEventListener('mouseup', () => { isDragging = false; });
+                if (window.__overlayScrollHandler) {
+                  window.removeEventListener('scroll', window.__overlayScrollHandler);
+                  window.__overlayScrollHandler = null;
                 }
-                
-                if (!window.__overlayScrollHandler) {
-                  window.__overlayScrollHandler = function() {
-                    if (!rafPending && !isDragging) {
-                      rafPending = true;
-                      requestAnimationFrame(() => {
-                        const overlay = document.getElementById('extension-image-overlay');
-                        if (overlay && !isDragging) {
-                          const topOffset = parseInt(overlay.dataset.topOffset) || 0;
-                          const leftOffset = parseInt(overlay.dataset.leftOffset) || 0;
-                          
-                          // Handle positioning based on whether image was manually positioned
-                          if (leftOffset === 0) {
-                            // Use centered positioning
-                            overlay.style.left = '50%';
-                            overlay.style.transform = 'translateX(-50%)';
-                          } else {
-                            // Use manual positioning - maintain left position
-                            overlay.style.left = leftOffset + 'px';
-                            overlay.style.transform = 'none';
-                          }
-                          
-                          // Always update top position relative to scroll
-                          overlay.style.top = (-window.scrollY + topOffset) + 'px';
-                          overlay.style.height = tempImg.naturalHeight + 'px';
-                        }
-                        rafPending = false;
-                      });
-                    }
-                  };
-                  window.addEventListener('scroll', window.__overlayScrollHandler, { passive: true });
-                }
-              };
-  
-              document.body.appendChild(overlay);
-              console.log("Overlay applied successfully with drag functionality");
-              return true;
-            } catch (error) {
-              console.error("Error applying overlay:", error);
-              return false;
-            }
-          },
-          args: [imageData, opacity / 100, width, topOffset, dragToggle.checked]
-        }, (results) => {
-          if (results && results[0] && results[0].result) {
-            removeButton.disabled = false;
-            statusDiv.textContent = "Overlay applied successfully!";
-          } else {
-            statusDiv.textContent = "Error applying overlay. Check console for details.";
-          }
-        });
-      } else {
-        statusDiv.textContent = "Cannot access current tab";
-      }
-    });
-  });
-
-  // Remove overlay button
-  removeButton.addEventListener('click', function() {
-    statusDiv.textContent = "Removing overlay...";
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      if (tabs[0] && tabs[0].id) {
-        chrome.scripting.executeScript({
-          target: {tabId: tabs[0].id},
-          func: function() {
-            try {
-              const existingOverlay = document.getElementById('extension-image-overlay');
-              if (existingOverlay) {
-                existingOverlay.parentNode.removeChild(existingOverlay);
                 console.log("Overlay removed successfully");
                 return true;
               }
